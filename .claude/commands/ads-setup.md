@@ -32,7 +32,7 @@ Ask these questions one section at a time. 3-4 questions per prompt. Wait for an
    - If they don't know any, that's fine -- the auto-discovery in Step 2 will find them
 2. List any aspirational competitors (bigger brands they admire). Optional.
 3. Tell the user: "We also pre-load Alex Hormozi as a default framework source. He tests 200 ads at any time. His Long-Runner hooks get pulled into your database as framework inspiration -- not to copy, but to study what structures work. You can remove him or add others."
-   - **Cost note:** First scrape of a big account like Hormozi pulls ~2000 ads ($0.10 Apify). After that, daily runs only catch new ads so costs drop to near zero. Apify free tier ($5/month) covers ~5 competitors scraped daily.
+   - **Cost note:** scraping costs roughly 3.3 Relevance credits per ad returned, plus 3 credits per run. A first backfill of a big account is the expensive part; daily runs after that only catch new ads. Keep the poller's `--limit` tight.
 
 **Default pre-loaded:**
 
@@ -42,21 +42,21 @@ Ask these questions one section at a time. 3-4 questions per prompt. Wait for an
 
 ### Auto-Discover Competitors
 
-After the user provides their niche and location (from Section 1), automatically search for direct competitors running Meta ads in their space.
+After the user provides their niche and location (from Section 1), search for direct
+competitors running Meta ads in their space:
 
-**Actor:** `apify/facebook-search-scraper` (official Apify -- 6.3k users, 98.5% success)
-
-```json
-{
-  "queries": ["{niche} {location}", "{niche} near {location}"],
-  "maxResults": 20
-}
+```bash
+scripts/adlib.sh discover --query "{niche}" --location "{location}" --limit 20
 ```
 
-From the results, filter for:
-- Pages with `ad_status` = "This Page is currently running ads"
-- Pages in a relevant category (Gym, Coach, Consultant, etc. matching their niche)
-- Pages with 500+ followers (filters out dead pages)
+Keywords go in `--query`, the place goes in `--location`. Do **not** concatenate them into one
+string -- the underlying search takes them as separate fields and returns nothing if you merge
+them.
+
+From `records[]`, filter for:
+- `is_running_ads` is `true` (already handles the "isn't currently running ads" wording)
+- `category` relevant to their niche (Gym, Coach, Consultant, etc.)
+- `followers` >= 500 (filters out dead pages)
 
 Present the discovered competitors:
 ```
@@ -69,9 +69,15 @@ We found {N} businesses in your niche running Meta ads:
 Which ones do you want to track? (all / pick numbers / none)
 ```
 
-For each selected competitor, resolve their `pageAdLibrary.id` using `apify/facebook-page-contact-information` and add to the Competitors table as "Direct" niche tier.
+If nothing comes back running ads, show the pages that were found anyway and let the user pick,
+or ask them for competitor URLs directly. Discovery is a convenience, not a hard requirement.
 
-This means a user can say "I run a boxing gym in Belfast" and walk away with 5-10 real competitors loaded and ready to scrape -- without knowing a single Facebook URL.
+For each selected competitor, resolve their Ad Library id with
+`scripts/adlib.sh resolve_page --urls "..."` and add to the Competitors table as "Direct" niche
+tier.
+
+This means a user can say "I run a boxing gym in Belfast" and walk away with real competitors
+loaded and ready to scrape -- without knowing a single Facebook URL.
 
 **Section 4: Your Ad Account**
 1. Do you have a Meta ad account? What is the ad account ID? (format: act_XXXXXXXXX)
@@ -84,8 +90,8 @@ This means a user can say "I run a boxing gym in Belfast" and walk away with 5-1
 1. Do you have an Airtable account? (free tier works)
    - If yes: do you want to use an existing base or create a new one? Get the base ID if existing.
    - If no: sign up at airtable.com (free) and come back
-2. Do you have an Apify account? (free tier works)
-   - If no: sign up at apify.com (free) and come back
+2. Do you have your Relevance AI credentials? (`RELEVANCE_API_KEY` and `RELEVANCE_PROJECT` in `.env`)
+   - These power Ad Library scraping. There is no Apify account to create.
 3. Do you use Slack? (optional -- for daily alerts)
 4. Do you use n8n? (optional -- for automation)
 
@@ -99,29 +105,23 @@ Before creating tables, resolve all competitor Page IDs automatically.
 
 For each competitor that has a Facebook Page URL (not a numeric ID):
 
-**Actor:** `apify/facebook-page-contact-information` (official Apify -- 4.8k users, 99.6% success, ~$0.013/page)
+Batch up to 25 URLs into a single call:
 
-```json
-{
-  "pages": [
-    "https://www.facebook.com/{page_slug_1}/",
-    "https://www.facebook.com/{page_slug_2}/",
-    "https://www.facebook.com/{page_slug_3}/"
-  ]
-}
+```bash
+scripts/adlib.sh resolve_page --urls "https://www.facebook.com/{slug1}/,https://www.facebook.com/{slug2}/"
 ```
 
-Run all pages in a single call (batch). From the response, extract:
-- `pageAdLibrary.id` -- this is the Ad Library Page ID needed for scraping (NOT `facebookId` or `pageId`)
+From each entry in `records[]`, extract:
+- `ad_library_id` -- the Ad Library Page ID needed for scraping. The helper already picks this
+  over the profile id, which is a different number.
 - `title` -- confirmed page name
 - `website` -- their website URL
 - `category` -- their business category
-- `ad_status` -- whether they are currently running ads
+- `is_running_ads` -- boolean
 - `followers` -- page follower count
 
-**CRITICAL:** `facebookId`/`pageId` and `pageAdLibrary.id` are DIFFERENT numbers. Always use `pageAdLibrary.id` for Ad Library URLs.
-
-If a user provided an Ad Library URL, extract the Page ID from the `view_all_page_id=` parameter directly -- no scraping needed.
+If a user provided an Ad Library URL, extract the Page ID from the `view_all_page_id=` parameter
+directly -- no scraping needed.
 
 Print the resolved results:
 ```
@@ -289,10 +289,10 @@ Based on which tools the user has, configure their MCP connections.
    - Replace `${AIRTABLE_API_KEY}` with reference to their .env key
    - Merge into project `.mcp.json`
 
-2. **Apify MCP**
-   - Read `mcp-configs/apify.json`
-   - Replace `${APIFY_TOKEN}` with reference to their .env key
-   - Merge into project `.mcp.json`
+2. **Meta Ad Library access** (no MCP server)
+   - Confirm `RELEVANCE_API_KEY` and `RELEVANCE_PROJECT` are set in `.env`
+   - Smoke-test with: `scripts/adlib.sh resolve_page --urls "https://www.facebook.com/AlexHormozi/"`
+   - See `docs/ad-library-access.md`
 
 **Required for ad management:**
 
@@ -338,7 +338,7 @@ CREATED:
 
 MCP SERVERS:
 - Airtable: Connected
-- Apify: Connected
+- Ad Library (via Relevance): Connected
 - Meta Ads: {Connected / Not configured}
 - Slack: {Connected / Not configured}
 - n8n: {Connected / Not configured}
@@ -359,7 +359,7 @@ To update your config later, edit CLAUDE.md directly.
 
 1. Ask questions ONE SECTION AT A TIME. Do not dump all 5 sections at once.
 2. Wait for the user to answer before moving to the next section.
-3. If the user provides a Facebook Page URL instead of a numeric ID, auto-resolve it using `apify/facebook-pages-scraper`. Only fall back to manual lookup if the resolver fails.
+3. If the user provides a Facebook Page URL instead of a numeric ID, auto-resolve it using `scripts/adlib.sh resolve_page`. Only fall back to manual lookup if the resolver fails.
 4. If Airtable table creation fails, provide manual setup instructions as fallback (link to `docs/airtable-setup.md`).
 5. Never store API keys in CLAUDE.md or any tracked file. Keys stay in `.env` only.
 6. The CLAUDE.md is the single source of truth. All other skills read from it at runtime.

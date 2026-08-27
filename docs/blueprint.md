@@ -12,7 +12,7 @@ The longer you run it, the smarter it gets.
 Define who you are watching. Direct competitors (selling similar things to similar people), adjacent competitors (related niches), and aspirational brands (the big names worth learning from). All stored in Airtable.
 
 ### 2. Daily Ad Poller (`/ad-poller`)
-Scrapes Meta Ad Library via Apify for every active competitor. Detects new ads, marks killed ads, calculates how long each ad has been running. Ads running 30+ days are flagged as validated winners -- they are spending money on it, so it is working.
+Scrapes the Meta Ad Library (via Relevance AI) for every active competitor. Detects new ads, marks killed ads, calculates how long each ad has been running. Ads running 30+ days are flagged as validated winners -- they are spending money on it, so it is working.
 
 ### 3. Analysis Engine (`/ad-analyzer`)
 Downloads video creatives and runs them through the analysis stack:
@@ -67,7 +67,7 @@ Your best ads inform your next ads. The system feeds itself.
 ## Data Flow
 
 ```
-Meta Ad Library (Apify)
+Meta Ad Library (Relevance AI)
     |
     v
 Ad Swipe File (Airtable)
@@ -89,7 +89,7 @@ Winners --> back to Ad Swipe File
 
 - **Claude Code** -- the brain (runs all skills)
 - **Airtable** -- the database (pipeline + swipe file + competitors)
-- **Apify** -- the scraper (Meta Ad Library)
+- **Relevance AI** -- the scraper gateway (Meta Ad Library, no Apify account)
 - **Meta Graph API** -- the launcher (campaign management)
 - **Whisper** -- the ears (video transcription)
 - **Gemini** -- the eyes (visual analysis)

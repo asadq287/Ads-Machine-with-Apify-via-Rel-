@@ -38,7 +38,7 @@ Scrape competitors. Analyze winners. Generate ads. Launch campaigns. Track perfo
 ## How It Works
 
 ```
-POLL       Scrape competitor ads daily from Meta Ad Library
+POLL       Scrape competitor ads daily from Meta Ad Library (no Apify account needed)
   |
 ANALYZE    Whisper transcribe, Claude extract hooks, Gemini visual analysis
   |
@@ -169,7 +169,7 @@ n8n/ad-poller-workflow.json
 
 5-minute setup:
 1. Import the JSON into your n8n instance
-2. Add your Airtable + Apify credentials
+2. Add your Airtable + Relevance AI credentials
 3. Replace 3 placeholder IDs
 4. Activate
 
@@ -186,12 +186,15 @@ The Ads Machine uses [MCP](https://modelcontextprotocol.io) (Model Context Proto
 | MCP Server | Required | What It Does |
 |-----------|----------|-------------|
 | **Airtable** | Yes | Pipeline database -- swipe file, ad records, status tracking |
-| **Apify** | Yes | Meta Ad Library scraping and competitor monitoring |
 | **Meta Ads** | For launching | Campaign creation, ad management, performance data |
 | **Slack** | Optional | Daily alerts -- new competitor ads, kill/scale decisions |
 | **n8n** | Optional | Cron jobs -- daily poller, weekly reports, automation |
 
 All configured during `/ads-setup`. The Meta Ads MCP server ships in the repo at `mcp-servers/meta-ads-mcp/`.
+
+**Meta Ad Library scraping does not use an MCP server and does not need an Apify account.**
+It runs through `scripts/adlib.sh`, which calls a Relevance AI tool over HTTPS. Relevance runs
+the Apify actors on its own platform key. See [`docs/ad-library-access.md`](docs/ad-library-access.md).
 
 ---
 
@@ -239,11 +242,26 @@ The `reference/` folder contains universal ad frameworks -- no personal data, no
 
 ---
 
+## Ad Library Access
+
+Scraping is routed through one helper, `scripts/adlib.sh`, with three operations:
+
+```bash
+scripts/adlib.sh scrape_ads   --page-url https://www.facebook.com/SHEINOFFICIAL --limit 100
+scripts/adlib.sh resolve_page --urls "https://www.facebook.com/a/,https://www.facebook.com/b/"
+scripts/adlib.sh discover     --query "boxing gym" --location "Belfast"
+```
+
+Full contract, output schema, retry variants and cost notes:
+[`docs/ad-library-access.md`](docs/ad-library-access.md).
+
+---
+
 ## Requirements
 
 - [Claude Code](https://claude.ai/claude-code) with a Claude Pro or Team subscription
 - [Airtable](https://airtable.com) account (free tier works to start)
-- [Apify](https://apify.com) account (free tier gives 100+ scrapes/month)
+- [Relevance AI](https://relevanceai.com) API key -- powers Ad Library scraping, no Apify account required
 - [Meta Business](https://business.facebook.com) account (for ad management features)
 - Python 3.10+ (for Meta Ads MCP server)
 - ffmpeg + whisper.cpp (optional -- for video ad transcription)

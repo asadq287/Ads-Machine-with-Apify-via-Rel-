@@ -6,7 +6,7 @@ Runs daily at 6am. Scrapes all your tracked competitors from Meta Ad Library, de
 
 The workflow ships with **Alex Hormozi** as the default aspirational hook farm. He tests 200 ads at any time -- the Long-Runners are proven winners.
 
-**Cost warning:** Hormozi has 2000+ ads in the Ad Library. The first scrape pulls all of them (~$0.10 Apify credits). After that, daily runs only find new ads so costs drop to near zero. Apify free tier gives $5/month -- enough for ~5 competitors scraped daily.
+**Cost warning:** Hormozi has 2000+ ads in the Ad Library. The first scrape pulls all of them (~330 Relevance credits per 100 ads). After that, daily runs only find new ads so costs drop sharply. Cost scales with ads returned, so keep `MAX_ADS` tight on daily runs.
 
 You can add or change competitors anytime by editing your Competitors table in Airtable. The workflow scrapes whatever is there.
 
@@ -25,9 +25,12 @@ You can add or change competitors anytime by editing your Competitors table in A
 - Paste your Airtable PAT
 - Name it "Airtable Token"
 
-**Apify:**
+**Relevance AI** (this is what scrapes the Ad Library -- there is no Apify account):
 - In n8n, go to Settings > Variables (or use Environment Variables)
-- Add: `APIFY_TOKEN` = your Apify API token
+- Add `RELEVANCE_API_KEY` = your Relevance AI API key (starts with `sk-`)
+- Add `RELEVANCE_PROJECT` = your Relevance AI project id
+- Add `RELEVANCE_REGION` = your region code (e.g. `f1db6c`)
+- Add `RELEVANCE_ADLIB_STUDIO_ID` = `ef522aa0-5a0c-4847-83de-b1220de49a08`
 
 ### 3. Update the placeholder IDs
 
@@ -70,7 +73,7 @@ Read existing ads (for dedup)
 For each competitor: build Ad Library URL
   |
   v
-Call Apify scraper (active + inactive ads, sorted by impressions)
+Call the Relevance Ad Library tool (active + inactive ads, sorted by impressions)
   |
   v
 Dedup, calculate Days Active, assign Longevity Tier

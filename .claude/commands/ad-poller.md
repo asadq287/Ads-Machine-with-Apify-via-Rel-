@@ -1,6 +1,6 @@
 ---
 name: ad-poller
-description: Scrape all competitor ads from Meta Ad Library via Apify. Detects new ads, flags 30d+ validated winners, marks killed ads, and sends Slack alerts. Run daily or manually.
+description: Scrape all competitor ads from the Meta Ad Library. Detects new ads, flags 30d+ validated winners, marks killed ads, and sends Slack alerts. Run daily or manually.
 ---
 
 # Daily Ad Poller
@@ -14,7 +14,7 @@ You are a competitive ad intelligence scraper. You pull every active Meta ad fro
 ## Prerequisites
 
 1. **Airtable MCP** connected (run `/ads-setup` if not)
-2. **Apify MCP** connected or `APIFY_TOKEN` in `.env`
+2. **Relevance AI credentials** in `.env` (`RELEVANCE_API_KEY`, `RELEVANCE_PROJECT`). No Apify account needed -- see [`docs/ad-library-access.md`](../../docs/ad-library-access.md)
 3. **Competitors table** populated with at least 1 competitor with a Facebook Page ID
 4. **CLAUDE.md** configured with Airtable base ID and table IDs
 
@@ -60,87 +60,63 @@ If no competitors found, tell the user to populate the Competitors table first o
 
 ## Step 1b: Resolve Page IDs (if needed)
 
-If any competitor has a Facebook Page URL but no numeric Page ID, resolve it automatically:
+If any competitor has a Facebook Page URL but no numeric Page ID, resolve it. Batch up to 25
+URLs per call:
 
-**Actor:** `apify/facebook-page-contact-information` (official Apify -- 4.8k users, 99.6% success, ~$0.013/page)
-
-```json
-{
-  "pages": ["https://www.facebook.com/{page_slug}/"]
-}
+```bash
+scripts/adlib.sh resolve_page --urls "https://www.facebook.com/{slug1}/,https://www.facebook.com/{slug2}/"
 ```
 
-**CRITICAL:** The response contains TWO different IDs. You MUST use the right one:
-- `facebookId` / `pageId` = the Facebook profile ID (DO NOT USE for Ad Library)
-- `pageAdLibrary.id` = the Ad Library Page ID (USE THIS ONE)
+Each record in `records[]` gives you:
 
-Also extract from the response:
-- `title` = confirmed page name
-- `ad_status` = "This Page is currently running ads." or "This Page isn't currently running ads."
-- `website`, `category`, `followers` = useful metadata
+- `ad_library_id` -- **this is the Page ID to store.** It is not the profile id; the helper
+  already picks the right one for you.
+- `title` -- confirmed page name
+- `is_running_ads` -- boolean, already handles the "isn't currently running ads" wording
+- `website`, `category`, `followers` -- useful metadata
 
-Update the Competitors table with the resolved `pageAdLibrary.id`.
+Update the Competitors table with `ad_library_id`.
 
-If the resolver fails, tell the user to find it manually: facebook.com/ads/library > search the page name > copy `view_all_page_id=` from the URL.
+If a page cannot be resolved, tell the user to find it manually: facebook.com/ads/library >
+search the page name > copy `view_all_page_id=` from the URL.
 
 ---
 
-## Step 2: Scrape Each Competitor via Apify
+## Step 2: Scrape Each Competitor
 
 For each competitor, scrape ALL ads (active + inactive/historical) from the Meta Ad Library.
 
-### Primary Actor: `apify/facebook-ads-scraper`
-
-Official Apify actor. 16k+ users, 99.4% success rate. Most reliable long-term.
-
-**Input per competitor:**
-```json
-{
-  "startUrls": [{"url": "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&is_targeted_country=false&media_type=all&search_type=page&sort_data[direction]=desc&sort_data[mode]=total_impressions&view_all_page_id={PAGE_ID}"}],
-  "resultsLimit": 100
-}
+```bash
+scripts/adlib.sh scrape_ads --page-url {PAGE_URL} --limit 100
 ```
 
-Key URL parameters:
-- `active_status=all` -- pulls active AND historical/inactive ads
-- `sort_data[mode]=total_impressions` -- highest impression ads first
-- `country=ALL` -- all countries (change to `GB`, `US`, etc. to filter)
+**Prefer `--page-url`.** If you only have the Ad Library id, use `--page-id {PAGE_ID}` instead --
+but the page URL is measurably more reliable: the `view_all_page_id` URL form often returns an
+empty result set for pages that do have ads.
 
-Use the Apify MCP `call-actor` tool. Set `async: false` so it waits for results.
+The helper handles the actor, the Ad Library URL, active+historical status, impression sorting,
+and result normalisation. It prints one JSON object -- see
+[`docs/ad-library-access.md`](../../docs/ad-library-access.md) for the full contract.
 
-### Fallback Actor 1: `curious_coder~facebook-ads-library-scraper`
+### Retries
 
-Use if the primary actor is unavailable or returns errors.
+If a scrape returns a non-empty `actor_errors`, retry the same competitor with another scraper:
 
-```json
-{
-  "urls": [{"url": "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&media_type=all&search_type=page&view_all_page_id={PAGE_ID}"}],
-  "scrapePageAds.activeStatus": "all",
-  "scrapePageAds.sortBy": "impressions_desc",
-  "count": 100
-}
+```bash
+scripts/adlib.sh scrape_ads --page-url {PAGE_URL} --limit 100 --variant fallback1
+scripts/adlib.sh scrape_ads --page-id  {PAGE_ID}  --limit 100 --variant fallback2
 ```
 
-### Fallback Actor 2: `whoareyouanas/meta-ad-scraper`
-
-Simplest input -- takes Page ID directly.
-
-```json
-{
-  "pageId": "{PAGE_ID}",
-  "activeStatus": "all",
-  "country": "ALL",
-  "sortMode": "total_impressions",
-  "sortDirection": "desc"
-}
-```
+`fallback2` requires `--page-id`. Log which variant succeeded for each competitor.
 
 ### Scraping rules
 
-- Run competitors in sequence (not parallel) to avoid Apify rate limits
-- Each scrape takes 30-120 seconds depending on ad count
+- Run competitors in sequence, not parallel
+- Each scrape takes roughly 30-120 seconds depending on ad count
 - Print progress after each: `[{N}/{total}] {Name}: {count} ads scraped`
-- If the primary actor fails on a competitor, retry once. If it fails again, try Fallback 1. Log which actor succeeded.
+- An empty `records[]` with an empty `actor_errors` means the page genuinely has no ads in the
+  Library -- that is not a failure, do not retry it
+- Keep `--limit` tight on daily polls. Cost is roughly 3.3 Relevance credits per ad returned
 
 ---
 
@@ -170,56 +146,45 @@ Build a set of existing Ad Archive IDs.
 
 ## Step 4: Transform and Insert New Ads
 
-For each new ad, transform the Apify response into an Airtable record.
+For each new ad, transform a record from `records[]` into an Airtable record.
 
-**Key field mappings (Primary actor: `apify/facebook-ads-scraper`) -- CONFIRMED via live test:**
+The helper normalises every scraper into one shape, so there is a single mapping regardless of
+which actor ran:
 
-| Swipe File Field | Source Path | Notes |
-|-----------------|------------|-------|
-| Ad Archive ID | `adArchiveId` | String. Primary dedup key. Also available as `adArchiveID` |
+| Swipe File Field | Source | Notes |
+|-----------------|--------|-------|
+| Ad Archive ID | `ad_archive_id` | String. Primary dedup key. |
 | Competitor | Competitor name from your table | Not in the scrape output -- you add this |
-| Page Name | `pageName` | Top-level field |
-| Ad Library URL | `https://www.facebook.com/ads/library/?id={adArchiveId}` | Construct from ID |
+| Page Name | `page_name` | |
+| Ad Library URL | `ad_library_url` | Already constructed |
 | Status | `Active` | Your classification -- always start as Active |
-| Ad Active Status | `isActive` (boolean) | `true` = Active, `false` = Inactive. Convert to text for Airtable |
-| Start Date | `startDateFormatted` | ISO string e.g. `2026-02-13T08:00:00.000Z`. Also `startDate` as unix timestamp |
-| End Date | `endDateFormatted` | ISO string. Present for ALL ads (active ads show today's date) |
-| Display Format | `snapshot.displayFormat` | Values: `VIDEO`, `IMAGE`, `DCO`, `CAROUSEL`. Map to title case for Airtable |
-| Body Text | `snapshot.body.text` | Full ad copy with formatting preserved |
-| Title | `snapshot.title` | May be `{{product.name}}` for DCO ads -- skip those |
-| CTA Type | `snapshot.ctaType` | e.g. `LEARN_MORE`, `SIGN_UP`, `APPLY_NOW` |
-| CTA Text | `snapshot.ctaText` | e.g. `Learn more`, `Sign up`, `Apply now` |
-| Link URL | `snapshot.linkUrl` | Landing page URL |
-| Video URL | `snapshot.videos[0].videoHdUrl` | HD preferred. Fallback: `snapshot.videos[0].videoSdUrl` |
-| Image URL | `snapshot.images[0].originalImageUrl` | For carousels, use `snapshot.cards[0].originalImageUrl` |
-| Publisher Platforms | `publisherPlatform` | Array: `["FACEBOOK", "INSTAGRAM", "AUDIENCE_NETWORK"]` |
-| Word Count | Count words in `snapshot.body.text` | |
-| Hook Copy | First line of Body Text (up to first period or newline) | |
+| Ad Active Status | `is_active` (boolean) | `true` = Active, `false` = Inactive. Convert to text |
+| Start Date | `start_date` | ISO 8601 |
+| End Date | `end_date` | ISO 8601 |
+| Display Format | `display_format` | `VIDEO`, `IMAGE`, `DPA`, `CAROUSEL`. Map to title case |
+| Body Text | `body_text` | Full ad copy |
+| Title | `title` | Already `null` when the ad used a `{{product.name}}` placeholder |
+| CTA Type | `cta_type` | e.g. `LEARN_MORE`, `SIGN_UP` |
+| CTA Text | `cta_text` | e.g. `Learn more` |
+| Link URL | `link_url` | |
+| Video URL | `video_url` | Already falls back through HD -> SD -> first card |
+| Image URL | `image_url` | Already falls back to the first card for carousel/DPA |
+| Publisher Platforms | `publisher_platforms` | Array |
+| Impressions Rank | `impressions_rank` | Position in the result set |
+| Word Count | Count words in `body_text` | |
+| Hook Copy | First line of `body_text` (up to first period or newline) | |
 | Scrape Date | Today's date | |
-| Scrape Batch ID | Apify dataset ID | From the `call-actor` response |
+| Scrape Batch ID | `{competitor_name}-{YYYY-MM-DD}` | |
 | Is Analyzed | false | |
 
-**DCO ads:** When `displayFormat` = `DCO`, the body text is often `{{product.brand}}` and title is `{{product.name}}`. These are Meta's dynamic templates. The REAL copy is in `snapshot.cards[].body` and `snapshot.extraTexts[].text`. Extract copy from cards first, then extraTexts as fallback.
+**DPA / DCO ads:** when `display_format` is `DPA` or `DCO`, Meta assembles the creative
+dynamically and `title` comes back `null`. The real copy is in `cards[]` and `extra_texts[]`.
+Read `cards[].body` and `cards[].title` first, then `extra_texts[]`.
 
-**Carousel ads:** Creative data is in `snapshot.cards[]` array. Each card has its own `body`, `title`, `ctaType`, `originalImageUrl`, `videoSdUrl`.
+**Carousel ads:** each entry in `cards[]` has its own `body`, `title`, `cta_type`, `image_url`,
+`video_url`, `link_url`.
 
-**IMPORTANT: Output fields vary between actors.** When processing results:
-1. Log the first result to see the exact field names
-2. Try the primary field name first, then known alternatives
-3. If a field is missing, leave it blank rather than erroring
-
-**Fallback field name mappings:**
-
-| Field | Primary (`apify/facebook-ads-scraper`) | Fallback 1 (`curious_coder`) | Fallback 2 (`whoareyouanas`) |
-|-------|---------------------------------------|------------------------------|------------------------------|
-| Archive ID | `adArchiveId` | `ad_archive_id` | `adArchiveID` |
-| Body text | `snapshot.body.text` | `snapshot.body.text` | `description` |
-| Page name | `pageName` | `snapshot.page_name` | `brandName` |
-| Start date | `startDateFormatted` (ISO) | `start_date` (unix) | `startDate` |
-| Active status | `isActive` (boolean) | `scrapePageAds.activeStatus` | `activeStatus` |
-| Video URL | `snapshot.videos[0].videoHdUrl` | `snapshot.videos[0].video_hd_url` | `videoUrl` |
-| Image URL | `snapshot.images[0].originalImageUrl` | `snapshot.images[0].original_image_url` | `imageUrl` |
-| Display format | `snapshot.displayFormat` | `snapshot.displayFormat` | `mediaType` |
+Only send fields that have values. Do not send null or empty fields.
 
 **Insert in batches of 10** (Airtable limit per request).
 
@@ -312,15 +277,15 @@ Next step: Run /ad-analyzer to transcribe and classify new ads.
 
 ## CRITICAL RULES
 
-1. **Primary actor is `apify/facebook-ads-scraper`** (official Apify, 16k+ users, 99.4% success). Fallback 1: `curious_coder~facebook-ads-library-scraper`. Fallback 2: `whoareyouanas/meta-ad-scraper`.
-2. **Always scrape with `active_status=all`** to get both active and historical/inactive ads. Inactive ads that ran 60+ days are proven winners.
-3. **Start dates may be ISO strings or unix timestamps** depending on the actor. Handle both: try parsing as ISO first, then as unix timestamp.
-4. **DCO ads have no media URLs.** Display format = DCO means Meta assembles the creative dynamically. Still insert the record -- the copy is useful.
+1. **All Ad Library access goes through `scripts/adlib.sh`.** Never call Apify directly and never ask the user for an Apify token -- there isn't one. The scraper runs on Relevance's platform key.
+2. **Active and historical ads are both pulled by default.** Inactive ads that ran 60+ days are proven winners, so never filter them out.
+3. **Dates arrive as ISO 8601 strings.** The helper normalises unix timestamps for you.
+4. **DPA/DCO ads may have no top-level media.** The helper falls back to the first card. Still insert the record -- the copy is useful.
 5. **Dedup on Ad Archive ID.** Same ad can appear in multiple scrapes.
 6. **Airtable batch limit is 10 records per request.** Always batch creates and updates.
-7. **Facebook Page ID vs Profile ID:** The Competitors table stores the Ad Library page ID, NOT the profile ID. Use `apify/facebook-page-contact-information` to resolve page URLs to Ad Library IDs (the `pageAdLibrary.id` field -- NOT `facebookId` or `pageId`).
-8. **Run competitors in sequence.** Parallel scraping hits Apify rate limits.
+7. **Facebook Page ID vs Profile ID:** The Competitors table stores the Ad Library page ID, NOT the profile ID. Use `scripts/adlib.sh resolve_page` and store the `ad_library_id` it returns.
+8. **Run competitors in sequence.** Parallel scraping hits upstream rate limits.
 9. **Never delete records.** Mark killed ads as Killed with an End Date. History matters.
 10. **Ad Active Status vs Status:** `Ad Active Status` is what Meta reports (Active/Inactive). `Status` is your swipe file classification (Active, Killed, Winner, Starred). An ad can be `Ad Active Status = Inactive` but `Status = Winner` -- that means it ran successfully and was turned off after scaling.
-11. **If the primary actor fails**, retry once. If it fails again, switch to Fallback 1. If that fails, try Fallback 2. Log which actor worked for each competitor.
-12. **Fallback if all Apify actors are down:** You can manually browse the Meta Ad Library at facebook.com/ads/library and add records to the Swipe File via Airtable directly. The rest of the pipeline (analyzer, ideator, scripter) still works.
+11. **If a scrape reports `actor_errors`**, retry once, then `--variant fallback1`, then `--variant fallback2` (which needs `--page-id`). Log which variant worked. An empty `records[]` with no errors is not a failure.
+12. **Fallback if every scraper is down:** browse the Meta Ad Library at facebook.com/ads/library and add records to the Swipe File via Airtable directly. The rest of the pipeline (analyzer, ideator, scripter) still works.

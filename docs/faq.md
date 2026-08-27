@@ -5,8 +5,10 @@
 **Q: Do I need a paid Airtable plan?**
 No. The free tier supports up to 1,000 records per base, which is enough to get started. You will eventually need a paid plan as your swipe file grows past 1,000 ads.
 
-**Q: Do I need a paid Apify plan?**
-No. The free tier gives you $5/month in platform credits, which is enough for 100+ competitor scrapes per month.
+**Q: Do I need an Apify account?**
+No. Ad Library scraping runs through a Relevance AI tool that uses Relevance's own Apify
+platform key. You need `RELEVANCE_API_KEY` and `RELEVANCE_PROJECT` in `.env` and nothing from
+Apify. Runs cost roughly 3.3 Relevance credits per ad returned, plus 3 credits per run.
 
 **Q: What Meta permissions do I need?**
 Your system user token needs `ads_management` and `ads_read` permissions. The ad account must be assigned to the system user in Business Settings > System Users > Add Assets.
@@ -33,7 +35,7 @@ The visual analysis step is skipped. You still get transcription, hook extractio
 
 ## Troubleshooting
 
-**Q: Apify scrape returns 0 ads for a competitor**
+**Q: Ad Library scrape returns 0 ads for a competitor**
 - Check that the Facebook Page ID is correct (not the profile ID)
 - The competitor may not have active ads right now
 - Try visiting the Ad Library URL manually to verify

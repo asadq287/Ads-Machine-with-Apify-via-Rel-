@@ -2,9 +2,9 @@
   "mcpServers": {
     "n8n": {
       "command": "npx",
-      "args": ["-y", "@anthropic-ai/n8n-mcp-server"],
+      "args": ["-y", "n8n-mcp"],
       "env": {
-        "N8N_INSTANCE_URL": "${N8N_INSTANCE_URL}",
+        "N8N_API_URL": "${N8N_INSTANCE_URL}",
         "N8N_API_KEY": "${N8N_API_KEY}"
       }
     }
