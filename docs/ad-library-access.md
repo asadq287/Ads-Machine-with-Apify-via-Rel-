@@ -91,6 +91,17 @@ Use `ad_library_id` as the Page ID everywhere. It is **not** the profile id.
 
 `name`, `page_url`, `category`, `followers`, `ad_status`, `is_running_ads`.
 
+> **`discover` is best-effort and currently unreliable.** The upstream
+> `apify/facebook-search-scraper` actor returns
+> `no_items: Empty or private data for provided input` most of the time, including for its
+> own documented example inputs. It has been observed working, so the input format here is
+> correct -- the actor itself is intermittent, most likely because Facebook blocks the
+> shared proxy pool it uses.
+>
+> Treat competitor discovery as a convenience. When it returns nothing, ask the user for
+> competitor Facebook page URLs directly and run `resolve_page` on them. `scrape_ads` and
+> `resolve_page` -- the two operations the pipeline actually depends on -- are reliable.
+
 ## Retries
 
 If `scrape_ads` errors, retry the same page with a different scraper:
@@ -103,5 +114,8 @@ scripts/adlib.sh scrape_ads --page-id  <id>  --variant fallback2   # needs --pag
 ## Cost
 
 Roughly **3.3 Relevance credits per ad** returned, plus 3 credits base per run. A 100-ad
-scrape is around 330 credits. `--limit` is capped at 250 server-side. Keep limits tight on
+scrape is around 330 credits. `--limit` is capped at 250 server-side, and floored at 10 when talking to the actor, because
+some scrapers refuse to run below that. The extra rows are trimmed before you see them, so
+`count` honours your `--limit` while `total_scraped` shows what was actually fetched and
+billed. Keep limits tight on
 daily polls: after the first backfill, daily runs only need to catch new ads.

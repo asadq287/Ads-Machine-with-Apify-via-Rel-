@@ -69,8 +69,14 @@ We found {N} businesses in your niche running Meta ads:
 Which ones do you want to track? (all / pick numbers / none)
 ```
 
-If nothing comes back running ads, show the pages that were found anyway and let the user pick,
-or ask them for competitor URLs directly. Discovery is a convenience, not a hard requirement.
+**Expect this to fail.** The upstream search actor is intermittent and usually returns
+`no_items`. That is not a bug in the setup -- do not retry it more than once, and do not tell
+the user something is broken on their end.
+
+When discovery returns nothing, fall straight back to asking the user for competitor Facebook
+page URLs (or business names they can look up), then run
+`scripts/adlib.sh resolve_page --urls "..."` on what they give you. Discovery is a convenience,
+not a hard requirement, and the rest of setup works without it.
 
 For each selected competitor, resolve their Ad Library id with
 `scripts/adlib.sh resolve_page --urls "..."` and add to the Competitors table as "Direct" niche

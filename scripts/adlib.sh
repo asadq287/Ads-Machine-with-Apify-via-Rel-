@@ -140,8 +140,25 @@ print(json.dumps(out, indent=2))
       exit 0
       ;;
     failed)
-      echo "adlib: the run failed. Relevance replied:" >&2
-      printf '%s\n' "$POLL" >&2
+      printf '%s' "$POLL" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.stderr.write("adlib: the run failed and the response could not be parsed.\n")
+    raise SystemExit
+msgs = []
+for u in d.get("updates") or []:
+    for e in u.get("errors") or []:
+        # "raw" is the short human-readable form; "body" embeds the whole step input.
+        m = e.get("raw") or e.get("body") or ""
+        m = str(m).split(" on state with input")[0].strip()
+        if m and m not in msgs:
+            msgs.append(m)
+sys.stderr.write("adlib: the run failed.\n")
+for m in msgs or ["no error detail returned by Relevance."]:
+    sys.stderr.write("  " + m + "\n")
+'
       exit 1
       ;;
     *)
