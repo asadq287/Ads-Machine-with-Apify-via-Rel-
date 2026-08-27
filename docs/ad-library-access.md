@@ -16,6 +16,15 @@ RELEVANCE_API_KEY=sk-...
 RELEVANCE_PROJECT=<project id>
 RELEVANCE_REGION=f1db6c
 RELEVANCE_ADLIB_STUDIO_ID=ef522aa0-5a0c-4847-83de-b1220de49a08
+ADLIB_MAX_RECORDS=50
+```
+
+`ADLIB_MAX_RECORDS` is the per-run ceiling on returned records. It defaults to **50** to
+protect credits and can be raised up to an absolute maximum of 250. A value set in the
+environment wins over `.env`, so a one-off override works:
+
+```bash
+ADLIB_MAX_RECORDS=150 scripts/adlib.sh scrape_ads --page-url <url> --limit 150
 ```
 
 ## The three operations
@@ -46,6 +55,9 @@ One JSON object on stdout:
 {
   "records": [ ... ],
   "count": 2,
+  "limit_notice": null,
+  "max_records": 50,
+  "total_scraped": 10,
   "total_available": null,
   "actor_errors": [],
   "operation": "scrape_ads",
@@ -53,6 +65,18 @@ One JSON object on stdout:
   "credits_cost": 6.6
 }
 ```
+
+`count` is what you got back. `total_scraped` is what the actor actually fetched and billed --
+it can be higher, because some scrapers refuse to run below a floor of 10 results.
+
+`limit_notice` is `null` unless the per-run ceiling actually bit. When it does, it reads:
+
+```
+Requested 200 records but this run is capped at 50. This is a configurable limit --
+raise ADLIB_MAX_RECORDS in .env (absolute maximum 250).
+```
+
+The helper also prints that line to stderr, so it is visible without parsing the JSON.
 
 `actor_errors` is non-empty when the scraper itself reported a problem (for example
 `no_items: Empty or private data for provided input`). An empty `records` array with an
@@ -114,8 +138,9 @@ scripts/adlib.sh scrape_ads --page-id  <id>  --variant fallback2   # needs --pag
 ## Cost
 
 Roughly **3.3 Relevance credits per ad** returned, plus 3 credits base per run. A 100-ad
-scrape is around 330 credits. `--limit` is capped at 250 server-side, and floored at 10 when talking to the actor, because
-some scrapers refuse to run below that. The extra rows are trimmed before you see them, so
-`count` honours your `--limit` while `total_scraped` shows what was actually fetched and
-billed. Keep limits tight on
+scrape is around 330 credits. `--limit` is clamped to `ADLIB_MAX_RECORDS` (default 50, absolute maximum 250) and floored at
+10 when talking to the actor, because some scrapers refuse to run below that. Extra rows are
+trimmed before you see them, so `count` honours your limit while `total_scraped` shows what was
+actually fetched and billed. At roughly 3.3 credits per ad, the default ceiling puts a single
+run at about 165 credits worst case. Keep limits tight on
 daily polls: after the first backfill, daily runs only need to catch new ads.

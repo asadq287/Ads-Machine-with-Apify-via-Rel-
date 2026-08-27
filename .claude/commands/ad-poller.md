@@ -116,6 +116,9 @@ scripts/adlib.sh scrape_ads --page-id  {PAGE_ID}  --limit 100 --variant fallback
 - Print progress after each: `[{N}/{total}] {Name}: {count} ads scraped`
 - An empty `records[]` with an empty `actor_errors` means the page genuinely has no ads in the
   Library -- that is not a failure, do not retry it
+- Runs are capped at `ADLIB_MAX_RECORDS` records (default 50). If a scrape comes back with a
+  `limit_notice`, relay it to the user verbatim -- it tells them the cap is configurable and how
+  to raise it. Do not silently raise it yourself
 - Keep `--limit` tight on daily polls. Cost is roughly 3.3 Relevance credits per ad returned
 
 ---

@@ -252,6 +252,9 @@ scripts/adlib.sh resolve_page --urls "https://www.facebook.com/a/,https://www.fa
 scripts/adlib.sh discover     --query "boxing gym" --location "Belfast"
 ```
 
+Each run returns at most `ADLIB_MAX_RECORDS` records (default **50**, absolute maximum 250).
+When that ceiling is hit, the helper says so and tells you how to raise it.
+
 Full contract, output schema, retry variants and cost notes:
 [`docs/ad-library-access.md`](docs/ad-library-access.md).
 

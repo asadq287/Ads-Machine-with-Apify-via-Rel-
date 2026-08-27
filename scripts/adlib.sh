@@ -20,6 +20,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ---- config -----------------------------------------------------------------
+# Values already exported by the caller take precedence over .env, so a one-off
+# override like `ADLIB_MAX_RECORDS=10 scripts/adlib.sh ...` actually works.
+_ENV_KEYS="RELEVANCE_API_KEY RELEVANCE_PROJECT RELEVANCE_REGION RELEVANCE_ADLIB_STUDIO_ID RELEVANCE_POLL_TIMEOUT ADLIB_MAX_RECORDS"
+for _k in $_ENV_KEYS; do eval "_pre_${_k}=\"\${${_k}:-}\""; done
+
 if [ -f "$ROOT_DIR/.env" ]; then
   set -a
   # shellcheck disable=SC1091
@@ -27,9 +32,17 @@ if [ -f "$ROOT_DIR/.env" ]; then
   set +a
 fi
 
+for _k in $_ENV_KEYS; do
+  eval "_v=\"\$_pre_${_k}\""
+  if [ -n "$_v" ]; then eval "export ${_k}=\"\$_v\""; fi
+done
+unset _k _v
+
 : "${RELEVANCE_REGION:=f1db6c}"
 : "${RELEVANCE_ADLIB_STUDIO_ID:=ef522aa0-5a0c-4847-83de-b1220de49a08}"
 : "${RELEVANCE_POLL_TIMEOUT:=600}"
+# Per-run ceiling on returned records. Protects credits. Absolute maximum is 250.
+: "${ADLIB_MAX_RECORDS:=50}"
 
 die() { echo "adlib: $*" >&2; exit 1; }
 
@@ -66,6 +79,7 @@ done
 PARAMS_JSON="$(
   OP="$OP" PAGE_URL="$PAGE_URL" PAGE_ID="$PAGE_ID" URLS="$URLS" QUERY="$QUERY" \
   LOCATION="$LOCATION" LIMIT="$LIMIT" VARIANT="$VARIANT" COUNTRY="$COUNTRY" \
+  MAXREC="$ADLIB_MAX_RECORDS" \
   python3 -c '
 import json, os
 p = {"operation": os.environ["OP"]}
@@ -80,6 +94,10 @@ try:
     put("limit", "LIMIT", int)
 except ValueError:
     raise SystemExit("adlib: --limit must be a number.")
+try:
+    put("max_records", "MAXREC", int)
+except ValueError:
+    raise SystemExit("adlib: ADLIB_MAX_RECORDS must be a number.")
 print(json.dumps(p))
 '
 )"
@@ -135,6 +153,9 @@ for u in d.get("updates") or []:
 errs = out.get("actor_errors") or []
 if errs:
     sys.stderr.write("adlib: scraper reported: " + "; ".join(map(str, errs)) + "\n")
+notice = out.get("limit_notice")
+if notice:
+    sys.stderr.write("adlib: " + str(notice) + "\n")
 print(json.dumps(out, indent=2))
 '
       exit 0
